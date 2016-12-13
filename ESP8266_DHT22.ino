@@ -6,19 +6,47 @@
 #include <Hash.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
-//#include <LiquidCrystal_I2C.h>
-//#include <Wire.h>
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
 #include "DHT.h"
 #define DHTTYPE DHT22
-#define DHTPIN  4
+#define DHTPIN  16
 #define TEMP_LED 12
+#define APname "ESP"
+#define APpsswd "password"
 
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
 
+byte icon_termometer[8] = //icon for termometer
+{
+    B00100,
+    B01010,
+    B01010,
+    B01110,
+    B01110,
+    B11111,
+    B11111,
+    B01110
+};
+
+byte icon_water[8] = //icon for water droplet 
+{
+    B00100,
+    B00100,
+    B01010,
+    B01010,
+    B10001,
+    B10001,
+    B10001,
+    B01110,
+};
+
 String webPage;
 int pocet = 0;
+//Set the LCD address to 0x27 for a 16 chars and 2 line display
+LiquidCrystal_I2C lcd(0x27, 16, 2);
  
 // Initialize DHT sensor 
 
@@ -43,17 +71,25 @@ void saveConfigCallback () {
 
 //DHT dht(DHT_PIN, DHT_TYPE);
 
+void printToLCD(){
+  lcd.setCursor(0, 0);
+  lcd.print(APname);
+  lcd.print(" ");
+  lcd.print(APpsswd);
+  lcd.setCursor(0, 1);
+  lcd.print(WiFi.softAPIP());
+  Serial.println("lcd print");
+}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.println();
   dht.begin();           // initialize temperature sensor
+  // initialize the LCD
+  lcd.begin();
+  //Wire.begin(0, 2);
   pinMode(TEMP_LED, OUTPUT);
-  //int pocet;
-  //pocet=0;
-
-  //LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I2C address
-  //Wire.begin(0, 2); 
   
   //clean FS, for testing
   //SPIFFS.format();
@@ -120,9 +156,12 @@ void setup() {
   //wifiManager.addParameter(&custom_blynk_token);
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
   //reset settings - for testing
   //wifiManager.resetSettings();
-
+  
+  
   //set minimu quality of signal so it ignores AP's under that quality
   //defaults to 8%
   //wifiManager.setMinimumSignalQuality();
@@ -136,7 +175,7 @@ void setup() {
   //if it does not connect it starts an access point with the specified name
   //here  "AutoConnectAP"
   //and goes into a blocking loop awaiting configuration
-  if (!wifiManager.autoConnect("ESP8266_ToMQTT", "password")) {
+  if (!wifiManager.autoConnect(APname, APpsswd)) {
     Serial.println("failed to connect and hit timeout");
     delay(3000);
     //reset and try again, or maybe put it to deep sleep
@@ -146,6 +185,10 @@ void setup() {
 
   //if you get here you have connected to the WiFi
   Serial.println("connected...yeey :)");
+  lcd.setCursor(0, 0);
+  lcd.print("Pripojeno k WiFi");
+  lcd.setCursor(0, 1);
+  lcd.print("Connected to Wifi");
 
   //read updated parameters
   strcpy(mqtt_server, custom_mqtt_server.getValue());
@@ -174,13 +217,13 @@ void setup() {
 
   Serial.println("local ip");
   Serial.println(WiFi.localIP());
-
+  
   server.on("/", [](){
     server.send(200, "text/html", webPage);
   });
 
   server.begin();
-  Serial.println("HTTP server started");  
+  Serial.println("HTTP server start");  
   webPage += "<!DOCTYPE html>";
   webPage += "<html>";
   webPage += "<body>";
@@ -190,71 +233,78 @@ void setup() {
   webPage += "</body>";
   webPage += "</html>";
  
+  lcd.createChar(1, icon_termometer);
+  lcd.createChar(2, icon_water);
   
- /* lcd.begin(20,4);         // initialize the lcd for 20 chars 4 lines, turn on backlight
-  lcd.backlight();
-  lcd.setCursor(0,0);
-  lcd.print("IP: ");
-  lcd.print(WiFi.localIP());*/
   }
   
 void loop() {
   humidity = dht.readHumidity();          // Read humidity (percent)
   temp_c = dht.readTemperature();         // Read temperature as Celsius
   temp_f = dht.readTemperature(true);     // Read temperature as Farenheit
-   if (isnan(humidity) || isnan(temp_c) || isnan(temp_f)){ 
+  
+  if (isnan(humidity) || isnan(temp_c) || isnan(temp_f)){ 
     Serial.println("Failed to read from DHT sensor!");
+    lcd.setCursor(0, 1);
+    lcd.print("Chyba pri cteni");
     return;
   } 
-  Serial.print("Humidity: "); 
-  Serial.print(humidity);
-  Serial.print(" %\t");
-  Serial.print("Temperature: "); 
-  Serial.print(temp_c);
-  Serial.print(" C\t");
-  Serial.print("Temperature: "); 
-  Serial.print(temp_f);
-  Serial.print(" F\n");
-  digitalWrite(TEMP_LED, HIGH);
-  delay(500);
-  server.handleClient();
-  digitalWrite(TEMP_LED, LOW);
- 
-  webPage = "<!DOCTYPE><html><head><meta charset=\" UTF-8 \"><title>Meteo Stanice</title><style> body{text-align:center;margin:10px auto;} h1, p {font-family: Arial} table{margin:auto;border-collapse:collapse;font-family:Sans-serif;font-size: 25px;} table,th,td{border:1px solid black;padding:5px;text-align:center;}</style></head><body><h1>Meteo stanice</h1><p>Pro aktualní hodnoty teplot, obnovte stránku</p><table><thead><td>Teplota v &degF</td><td>Teplota v &degC</td><td>Vlhkost</td></thead><tbody><td>"+String((float)temp_f)+" &degF</td><td>"+String((float)temp_c)+" &degC</td><td>"+String((float)humidity)+"%</td></tbody></table></body></html>";
-  server.handleClient();
-
-    WiFiClient client;
-    const int httpPort = 80;
-    if (!client.connect(mqtt_server, httpPort)) {
-      return;
-    }
-
-    String url = "/update?key=";
-    url+=mqtt_port;
-    url+="&field1=";
-    url+=String(temp_c);
-    url+="&field2=";
-    url+=String(humidity);
-    url+="&field3=";
-    url+=String(temp_f);
-    url+="\r\n";
+      Serial.print("Humidity: "); 
+      Serial.print(humidity);
+      Serial.print(" %\t");
+      Serial.print("Temperature: "); 
+      Serial.print(temp_c);
+      Serial.print(" C\t");
+      Serial.print("Temperature: "); 
+      Serial.print(temp_f);
+      Serial.print(" F\n");
+      digitalWrite(TEMP_LED, HIGH);
+      delay(500);
+      digitalWrite(TEMP_LED, LOW);
+    
+      webPage = "<!DOCTYPE><html><head><meta charset=\" UTF-8 \"><title>Meteo Stanice</title><style> body{text-align:center;margin:10px auto;} h1, p {font-family: Arial} table{margin:auto;border-collapse:collapse;font-family:Sans-serif;font-size: 25px;} table,th,td{border:1px solid black;padding:5px;text-align:center;}</style></head><body><h1>Meteo stanice</h1><p>Pro aktualní hodnoty teplot, obnovte stránku</p><table><thead><td>Teplota v &degF</td><td>Teplota v &degC</td><td>Vlhkost</td></thead><tbody><td>"+String((float)temp_f)+" &degF</td><td>"+String((float)temp_c)+" &degC</td><td>"+String((float)humidity)+"%</td></tbody></table></body></html>";
+    
+      WiFiClient client;
+      const int httpPort = 80;
+      if (!client.connect(mqtt_server, httpPort)) {
+        return;
+      }
   
-    // Request to the server
-    client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: " + mqtt_server + "\r\n" + 
-               "Connection: close\r\n\r\n");
-               
-   for(pocet = 0; pocet <= 300; pocet++){
+      String url = "/update?key=";
+      url+=mqtt_port;
+      url+="&field1=";
+      url+=String(temp_c);
+      url+="&field2=";
+      url+=String(humidity);
+      url+="&field3=";
+      url+=String(temp_f);
+      url+="\r\n";
+    
+      // Request to the server
+      client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                 "Host: " + mqtt_server + "\r\n" + 
+                 "Connection: close\r\n\r\n");
+    lcd.setCursor(0, 0);
+    lcd.print("IP:");
+    lcd.print(WiFi.localIP());
+    lcd.print("    ");  
+    lcd.setCursor(0, 1);
+    lcd.write(1);
+    lcd.print(temp_c);
+    lcd.print((char)223); 
+    lcd.print("C  ");
+    //lcd.setCursor(9, 1);
+    lcd.write(2);
+    lcd.print(humidity);
+    lcd.print("%");
+  //}
+
+   for(pocet = 0; pocet <= 150; pocet++){
     server.handleClient();
     delay(2000);
     Serial.print(pocet);
     Serial.print("\t");
    }
-   pocet = 0;            
- /*lcd.setCursor(0,1);
- lcd.print("Temp: ");
- lcd.print(temp_c);
- lcd.print("*C Vlhkost ");
- lcd.print(humidity);
- lcd.print("%");*/ 
+ pocet = 0;            
+   
 }
