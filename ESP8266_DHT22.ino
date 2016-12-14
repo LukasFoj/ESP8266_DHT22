@@ -9,12 +9,13 @@
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
 #include "DHT.h"
+
 #define DHTTYPE DHT22
 #define DHTPIN  16
 #define TEMP_LED 12
 #define APname "ESP"
 #define APpsswd "password"
-
+#define BUTTON 2
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
@@ -45,6 +46,8 @@ byte icon_water[8] = //icon for water droplet
 
 String webPage;
 int pocet = 0;
+int buttonState = 0;
+
 //Set the LCD address to 0x27 for a 16 chars and 2 line display
 LiquidCrystal_I2C lcd(0x27, 16, 2);
  
@@ -54,8 +57,8 @@ DHT dht(DHTPIN, DHTTYPE, 11); // 11 works fine for ESP8266
 float humidity, temp_c, temp_f;  // Values read from sensor
 
 //define your default values here, if there are different values in config.json, they are overwritten.
-char mqtt_server[40] = "api.thingspeak.com";
-char mqtt_port[40] = "YourWriteAPI";
+char mqtt_server[40] = "";
+char mqtt_port[40] = "";
 //char blynk_token[34] = "";
 //const char* host = "api.thingspeak.com";
 //const char* writeAPIKey = "YourWriteAPI";
@@ -67,6 +70,18 @@ bool shouldSaveConfig = false;
 void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
+}
+
+unsigned long previousMillis = 0;        // will store last time 
+// constants won't change :
+const long interval = 10000; 
+
+void backlightLCD(){
+      lcd.backlight();
+      Serial.println("on");
+      delayMicroseconds(5000000);  
+      lcd.noBacklight();
+      Serial.println("off");
 }
 
 //DHT dht(DHT_PIN, DHT_TYPE);
@@ -85,10 +100,10 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.println();
+  interrupts();
   dht.begin();           // initialize temperature sensor
   // initialize the LCD
   lcd.begin();
-  //Wire.begin(0, 2);
   pinMode(TEMP_LED, OUTPUT);
   
   //clean FS, for testing
@@ -171,6 +186,7 @@ void setup() {
   //in seconds
   wifiManager.setTimeout(300);
 
+  printToLCD();
   //fetches ssid and pass and tries to connect
   //if it does not connect it starts an access point with the specified name
   //here  "AutoConnectAP"
@@ -235,7 +251,10 @@ void setup() {
  
   lcd.createChar(1, icon_termometer);
   lcd.createChar(2, icon_water);
-  
+  lcd.noBacklight();
+
+  pinMode(BUTTON, INPUT);
+  attachInterrupt(digitalPinToInterrupt(BUTTON), backlightLCD , HIGH);
   }
   
 void loop() {
@@ -258,12 +277,27 @@ void loop() {
       Serial.print("Temperature: "); 
       Serial.print(temp_f);
       Serial.print(" F\n");
+
+      lcd.setCursor(0, 0);
+      //lcd.print("IP:");
+      lcd.print(WiFi.localIP());
+      lcd.print("    ");  
+      lcd.setCursor(0, 1);
+      lcd.write(1);
+      lcd.print(temp_c);
+      lcd.print((char)223); 
+      lcd.print("C ");
+      lcd.write(2);
+      lcd.print(humidity);
+      lcd.print("%");
+    
       digitalWrite(TEMP_LED, HIGH);
       delay(500);
       digitalWrite(TEMP_LED, LOW);
     
       webPage = "<!DOCTYPE><html><head><meta charset=\" UTF-8 \"><title>Meteo Stanice</title><style> body{text-align:center;margin:10px auto;} h1, p {font-family: Arial} table{margin:auto;border-collapse:collapse;font-family:Sans-serif;font-size: 25px;} table,th,td{border:1px solid black;padding:5px;text-align:center;}</style></head><body><h1>Meteo stanice</h1><p>Pro aktualní hodnoty teplot, obnovte stránku</p><table><thead><td>Teplota v &degF</td><td>Teplota v &degC</td><td>Vlhkost</td></thead><tbody><td>"+String((float)temp_f)+" &degF</td><td>"+String((float)temp_c)+" &degC</td><td>"+String((float)humidity)+"%</td></tbody></table></body></html>";
-    
+      server.handleClient();
+      
       WiFiClient client;
       const int httpPort = 80;
       if (!client.connect(mqtt_server, httpPort)) {
@@ -284,27 +318,14 @@ void loop() {
       client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                  "Host: " + mqtt_server + "\r\n" + 
                  "Connection: close\r\n\r\n");
-    lcd.setCursor(0, 0);
-    lcd.print("IP:");
-    lcd.print(WiFi.localIP());
-    lcd.print("    ");  
-    lcd.setCursor(0, 1);
-    lcd.write(1);
-    lcd.print(temp_c);
-    lcd.print((char)223); 
-    lcd.print("C  ");
-    //lcd.setCursor(9, 1);
-    lcd.write(2);
-    lcd.print(humidity);
-    lcd.print("%");
-  //}
-
+                 
    for(pocet = 0; pocet <= 150; pocet++){
-    server.handleClient();
     delay(2000);
+    //lcd.noBacklight();
+    server.handleClient();
     Serial.print(pocet);
     Serial.print("\t");
    }
- pocet = 0;            
+   pocet = 0;            
    
 }
