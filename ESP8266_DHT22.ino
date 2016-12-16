@@ -1,4 +1,4 @@
-#include <FS.h>                   //this needs to be first, or it all crashes and burns...
+ #include <FS.h>                   //this needs to be first, or it all crashes and burns...
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
+#include <NTPTimeClient.h>
 #include "DHT.h"
 
 #define DHTTYPE DHT22
@@ -19,6 +20,13 @@
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
+
+// TimeClient settings
+const float UTC_OFFSET = 1;
+
+NTPTimeClient timeClient(UTC_OFFSET);
+
+void updateData();
 
 byte icon_termometer[8] = //icon for termometer
 {
@@ -79,7 +87,7 @@ const long interval = 10000;
 void backlightLCD(){
       lcd.backlight();
       Serial.println("on");
-      delayMicroseconds(5000000);  
+      delayMicroseconds(10000000);  
       lcd.noBacklight();
       Serial.println("off");
 }
@@ -201,10 +209,8 @@ void setup() {
 
   //if you get here you have connected to the WiFi
   Serial.println("connected...yeey :)");
-  lcd.setCursor(0, 0);
-  lcd.print("Pripojeno k WiFi");
   lcd.setCursor(0, 1);
-  lcd.print("Connected to Wifi");
+  lcd.print("Connected Wifi");
 
   //read updated parameters
   strcpy(mqtt_server, custom_mqtt_server.getValue());
@@ -251,6 +257,9 @@ void setup() {
  
   lcd.createChar(1, icon_termometer);
   lcd.createChar(2, icon_water);
+  lcd.setCursor(0, 0);
+  lcd.print(WiFi.localIP());
+  delay(5000);
   lcd.noBacklight();
 
   pinMode(BUTTON, INPUT);
@@ -278,9 +287,10 @@ void loop() {
       Serial.print(temp_f);
       Serial.print(" F\n");
 
-      lcd.setCursor(0, 0);
-      //lcd.print("IP:");
-      lcd.print(WiFi.localIP());
+      server.handleClient();
+      
+      /*lcd.setCursor(0, 0);
+      lcd.print(WiFi.localIP());*/
       lcd.print("    ");  
       lcd.setCursor(0, 1);
       lcd.write(1);
@@ -303,6 +313,7 @@ void loop() {
       if (!client.connect(mqtt_server, httpPort)) {
         return;
       }
+      
   
       String url = "/update?key=";
       url+=mqtt_port;
@@ -320,12 +331,25 @@ void loop() {
                  "Connection: close\r\n\r\n");
                  
    for(pocet = 0; pocet <= 150; pocet++){
-    delay(2000);
-    //lcd.noBacklight();
+    updateData();
+    delay(1000);
+    updateData();
+    delay(1000);
     server.handleClient();
     Serial.print(pocet);
     Serial.print("\t");
    }
    pocet = 0;            
    
+}
+
+void updateData(){
+  timeClient.updateTime();
+  lcd.setCursor(0, 0);
+  lcd.print(timeClient.getFormattedDate("."));
+  lcd.print(" ");
+  lcd.print(timeClient.getFormattedTime());
+  
+  Serial.println(timeClient.getFormattedDate("."));
+  Serial.println(timeClient.getFormattedTime());
 }
