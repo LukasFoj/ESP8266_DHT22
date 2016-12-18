@@ -1,22 +1,29 @@
- #include <FS.h>                   //this needs to be first, or it all crashes and burns...
+/* This is Meteo station, which measuring temperature and humidity with DHT22 (A2302).
+ * It will make AP to config it to your WiFi and then sending data to Thingspeak.
+ * It also has simple web interface, which provide you information of current temperature and humidity.
+ * It's tested and suitable with 16x2 I2C LCD display and ESP8266-201 SDK DEV board. 
+ * I2C LCD is connected SDA->GPIO4 SCL->GPIO05. Powered 5V and have same GND with chip
+ */
+#include <FS.h>                   //this needs to be first, or it all crashes and burns...
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <DNSServer.h>
-#include <ESP8266WebServer.h>
+#include <ESP8266WebServer.h> 
 #include <WebSocketsServer.h>
 #include <Hash.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 #include <Wire.h> 
-#include <LiquidCrystal_I2C.h>
-#include <NTPTimeClient.h>
-#include "DHT.h"
+#include <LiquidCrystal_I2C.h>    //use NewLiquidCrystal library from https://arduino-info.wikispaces.com/LCD-Blue-I2C
+#include <NTPTimeClient.h>        //needed for time update
+#include "DHT.h"                  //nedded for reading fom DHT sensor
 
-#define DHTTYPE DHT22
-#define DHTPIN  16
-#define TEMP_LED 12
-#define APname "ESP"
-#define APpsswd "password"
-#define BUTTON 2
+#define DHTTYPE DHT22             //defining DHT type
+#define DHTPIN  16                //defining which pin is DHT connected
+#define TEMP_LED 12               //defining pin which is LED connected
+#define APname "ESP"              //defining AP name
+#define APpsswd "password"        //defining AP password
+#define BUTTON 2                  //defining button pin
+#define button 0
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
@@ -84,17 +91,19 @@ unsigned long previousMillis = 0;        // will store last time
 // constants won't change :
 const long interval = 10000; 
 
-void backlightLCD(){
+void backlightLCDon(){        //interupt function, which makes lcd backlight on 
       lcd.backlight();
-      Serial.println("on");
-      delayMicroseconds(10000000);  
+      Serial.println("on"); 
+}
+
+void backlightLCDoff() {      //interupt function, which makes lcd backlight on 
       lcd.noBacklight();
       Serial.println("off");
 }
 
 //DHT dht(DHT_PIN, DHT_TYPE);
 
-void printToLCD(){
+void printToLCD(){     //printing AP name, AP password and AP IP address to config on display during config mode
   lcd.setCursor(0, 0);
   lcd.print(APname);
   lcd.print(" ");
@@ -108,17 +117,13 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.println();
-  interrupts();
+  interrupts();          //initialize interrupt
   dht.begin();           // initialize temperature sensor
-  // initialize the LCD
-  lcd.begin();
-  pinMode(TEMP_LED, OUTPUT);
-  
-  //clean FS, for testing
-  //SPIFFS.format();
-
-  //read configuration from FS json
-  Serial.println("mounting FS...");
+  lcd.begin();          // initialize the LCD
+  pinMode(TEMP_LED, OUTPUT); // set LED to output
+ 
+  //SPIFFS.format();      //clean FS, for testing
+  Serial.println("mounting FS..."); //read configuration from FS 
 
   if (SPIFFS.begin()) {
     Serial.println("mounted file system");
@@ -163,15 +168,11 @@ void setup() {
   WiFiManagerParameter custom_mqtt_port("port", "yourWriteAPI", mqtt_port, 40);
  // WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 32);
 
-  //WiFiManager
-  //Local intialization. Once its business is done, there is no need to keep it around
-  WiFiManager wifiManager;
+  WiFiManager wifiManager;      //Local intialization. Once its business is done, there is no need to keep it around
 
-  //set config save notify callback
-  wifiManager.setSaveConfigCallback(saveConfigCallback);
+  wifiManager.setSaveConfigCallback(saveConfigCallback);  //set config save notify callback
 
-  //set static ip
-  //wifiManager.setSTAStaticIPConfig(IPAddress(10,0,1,99), IPAddress(10,0,1,1), IPAddress(255,255,255,0));
+  //wifiManager.setSTAStaticIPConfig(IPAddress(10,0,1,99), IPAddress(10,0,1,1), IPAddress(255,255,255,0));    //you can set static IP
   
   //add all your parameters here
   wifiManager.addParameter(&custom_mqtt_server);
@@ -181,20 +182,15 @@ void setup() {
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
-  //reset settings - for testing
-  //wifiManager.resetSettings();
+  //wifiManager.resetSettings();  //reset settings - for testing
   
+  //wifiManager.setMinimumSignalQuality();    //set minimu quality of signal so it ignores AP's under that quality defaults to 8%
   
-  //set minimu quality of signal so it ignores AP's under that quality
-  //defaults to 8%
-  //wifiManager.setMinimumSignalQuality();
-  
-  //sets timeout until configuration portal gets turned off
-  //useful to make it all retry or go to sleep
-  //in seconds
+  //sets timeout until configuration portal gets turned off useful to make it all retry or go to sleep in seconds
   wifiManager.setTimeout(300);
 
   printToLCD();
+  
   //fetches ssid and pass and tries to connect
   //if it does not connect it starts an access point with the specified name
   //here  "AutoConnectAP"
@@ -240,12 +236,12 @@ void setup() {
   Serial.println("local ip");
   Serial.println(WiFi.localIP());
   
-  server.on("/", [](){
+  server.on("/", [](){    //shut on webserver and sending clean webpage
     server.send(200, "text/html", webPage);
   });
 
-  server.begin();
-  Serial.println("HTTP server start");  
+  server.begin();        //startingweb server
+  Serial.println("HTTP server started");  
   webPage += "<!DOCTYPE html>";
   webPage += "<html>";
   webPage += "<body>";
@@ -255,15 +251,15 @@ void setup() {
   webPage += "</body>";
   webPage += "</html>";
  
-  lcd.createChar(1, icon_termometer);
+  lcd.createChar(1, icon_termometer);   //creating char for LCD
   lcd.createChar(2, icon_water);
-  lcd.setCursor(0, 0);
-  lcd.print(WiFi.localIP());
   delay(5000);
-  lcd.noBacklight();
+  lcd.noBacklight();    //shutdown display backlight
 
-  pinMode(BUTTON, INPUT);
-  attachInterrupt(digitalPinToInterrupt(BUTTON), backlightLCD , HIGH);
+  pinMode(BUTTON, INPUT);   //setting button as input
+  attachInterrupt(digitalPinToInterrupt(BUTTON), backlightLCD , HIGH);    //adding interrupt on pressing on BUTTON
+  pinMode(button, INPUT);
+  attachInterrupt(digitalPinToInterrupt(button), backlightLCDoff , HIGH);
   }
   
 void loop() {
@@ -271,7 +267,7 @@ void loop() {
   temp_c = dht.readTemperature();         // Read temperature as Celsius
   temp_f = dht.readTemperature(true);     // Read temperature as Farenheit
   
-  if (isnan(humidity) || isnan(temp_c) || isnan(temp_f)){ 
+  if (isnan(humidity) || isnan(temp_c) || isnan(temp_f)){ //check, if values have been read correctly
     Serial.println("Failed to read from DHT sensor!");
     lcd.setCursor(0, 1);
     lcd.print("Chyba pri cteni");
@@ -287,12 +283,10 @@ void loop() {
       Serial.print(temp_f);
       Serial.print(" F\n");
 
-      server.handleClient();
+      server.handleClient();    //checking if there is some client request
       
-      /*lcd.setCursor(0, 0);
-      lcd.print(WiFi.localIP());*/
-      lcd.print("    ");  
-      lcd.setCursor(0, 1);
+      //Printing data on LCD display
+      lcd.setCursor(0, 1);    
       lcd.write(1);
       lcd.print(temp_c);
       lcd.print((char)223); 
@@ -300,21 +294,24 @@ void loop() {
       lcd.write(2);
       lcd.print(humidity);
       lcd.print("%");
-    
+
+      //blinking led, that temperature has been read
       digitalWrite(TEMP_LED, HIGH);
       delay(500);
       digitalWrite(TEMP_LED, LOW);
-    
+
+       //sending data to web page and handling client
       webPage = "<!DOCTYPE><html><head><meta charset=\" UTF-8 \"><title>Meteo Stanice</title><style> body{text-align:center;margin:10px auto;} h1, p {font-family: Arial} table{margin:auto;border-collapse:collapse;font-family:Sans-serif;font-size: 25px;} table,th,td{border:1px solid black;padding:5px;text-align:center;}</style></head><body><h1>Meteo stanice</h1><p>Pro aktualní hodnoty teplot, obnovte stránku</p><table><thead><td>Teplota v &degF</td><td>Teplota v &degC</td><td>Vlhkost</td></thead><tbody><td>"+String((float)temp_f)+" &degF</td><td>"+String((float)temp_c)+" &degC</td><td>"+String((float)humidity)+"%</td></tbody></table></body></html>";
       server.handleClient();
-      
+
+       //checking if can connect to server(to Thingspeak mqtt_server is adrress, httpPort is writeAPI key)
       WiFiClient client;
       const int httpPort = 80;
       if (!client.connect(mqtt_server, httpPort)) {
         return;
       }
       
-  
+    //sending data to Thingspeak
       String url = "/update?key=";
       url+=mqtt_port;
       url+="&field1=";
@@ -329,20 +326,23 @@ void loop() {
       client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                  "Host: " + mqtt_server + "\r\n" + 
                  "Connection: close\r\n\r\n");
-                 
-   for(pocet = 0; pocet <= 150; pocet++){
-    updateData();
-    delay(1000);
-    updateData();
-    delay(1000);
-    server.handleClient();
-    Serial.print(pocet);
-    Serial.print("\t");
-   }
-   pocet = 0;            
+
+     //waiting 5 minutes
+     //meanwhile updating time and handling client request
+     for(pocet = 0; pocet <= 150; pocet++){
+      updateData();
+      delay(1000);
+      updateData();
+      delay(1000);
+      server.handleClient();
+      Serial.print(pocet);
+      Serial.print("\t");
+     }
+     pocet = 0;            
    
 }
 
+//getting updated time and date from NTP server and printing to lcd
 void updateData(){
   timeClient.updateTime();
   lcd.setCursor(0, 0);
