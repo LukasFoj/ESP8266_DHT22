@@ -20,10 +20,11 @@
 #define DHTTYPE DHT22             //defining DHT type
 #define DHTPIN  16                //defining which pin is DHT connected
 #define TEMP_LED 12               //defining pin which is LED connected
-#define APname "ESP"              //defining AP name
-#define APpsswd "password"        //defining AP password
-#define BUTTON 2                  //defining button pin
-#define button 0
+//APname and APpsswd can't together exceed 15 char
+#define APname "APconf"              //defining AP name
+#define APpsswd "123456789"        //defining AP password
+#define buttonON 2                  //defining ON button pin
+#define buttonOFF 0                 //defining OFF button pin
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
@@ -32,8 +33,6 @@ WebSocketsServer webSocket(81);
 const float UTC_OFFSET = 1;
 
 NTPTimeClient timeClient(UTC_OFFSET);
-
-void updateData();
 
 byte icon_termometer[8] = //icon for termometer
 {
@@ -72,8 +71,8 @@ DHT dht(DHTPIN, DHTTYPE, 11); // 11 works fine for ESP8266
 float humidity, temp_c, temp_f;  // Values read from sensor
 
 //define your default values here, if there are different values in config.json, they are overwritten.
-char mqtt_server[40] = "";
-char mqtt_port[40] = "";
+char mqtt_server[40] = "api.thingspeak.com";
+char mqtt_port[40] = "Your WriteAPI";
 //char blynk_token[34] = "";
 //const char* host = "api.thingspeak.com";
 //const char* writeAPIKey = "YourWriteAPI";
@@ -87,18 +86,21 @@ void saveConfigCallback () {
   shouldSaveConfig = true;
 }
 
-unsigned long previousMillis = 0;        // will store last time 
-// constants won't change :
-const long interval = 10000; 
+unsigned long pMillis = 0;        // will store last time 
+unsigned long timeLCDon = 0;        // will store last time was LCD backlight on
+
 
 void backlightLCDon(){        //interupt function, which makes lcd backlight on 
       lcd.backlight();
-      Serial.println("on"); 
+      Serial.println("on");
+      timeLCDon = millis();
+      return; 
 }
 
 void backlightLCDoff() {      //interupt function, which makes lcd backlight on 
       lcd.noBacklight();
       Serial.println("off");
+      return;
 }
 
 //DHT dht(DHT_PIN, DHT_TYPE);
@@ -121,6 +123,11 @@ void setup() {
   dht.begin();           // initialize temperature sensor
   lcd.begin();          // initialize the LCD
   pinMode(TEMP_LED, OUTPUT); // set LED to output
+  
+  pinMode(buttonON, INPUT);   //setting button as input
+  attachInterrupt(digitalPinToInterrupt(buttonON), backlightLCDon , HIGH);    //adding interrupt on pressing on BUTTON
+  pinMode(buttonOFF, INPUT);
+  attachInterrupt(digitalPinToInterrupt(buttonOFF), backlightLCDoff , HIGH);
  
   //SPIFFS.format();      //clean FS, for testing
   Serial.println("mounting FS..."); //read configuration from FS 
@@ -205,8 +212,10 @@ void setup() {
 
   //if you get here you have connected to the WiFi
   Serial.println("connected...yeey :)");
+  lcd.setCursor(0, 0);
+  lcd.print("Connected Wifi              ");
   lcd.setCursor(0, 1);
-  lcd.print("Connected Wifi");
+  lcd.print(WiFi.localIP());  
 
   //read updated parameters
   strcpy(mqtt_server, custom_mqtt_server.getValue());
@@ -254,25 +263,55 @@ void setup() {
   lcd.createChar(1, icon_termometer);   //creating char for LCD
   lcd.createChar(2, icon_water);
   delay(5000);
-  lcd.noBacklight();    //shutdown display backlight
-
-  pinMode(BUTTON, INPUT);   //setting button as input
-  attachInterrupt(digitalPinToInterrupt(BUTTON), backlightLCD , HIGH);    //adding interrupt on pressing on BUTTON
-  pinMode(button, INPUT);
-  attachInterrupt(digitalPinToInterrupt(button), backlightLCDoff , HIGH);
-  }
   
-void loop() {
+  //lcd.noBacklight();    //shutdown display backlight
+  }
+
+//getting updated time and date from NTP server and printing to lcd
+void updateData(){
+  timeClient.updateTime();
+  lcd.setCursor(0, 0);
+  lcd.print(timeClient.getFormattedDate("."));
+  lcd.print(" ");
+  lcd.print(timeClient.getFormattedTime());
+  
+  Serial.println(timeClient.getFormattedDate("."));
+  Serial.println(timeClient.getFormattedTime());
+}
+
+void readSensor(){
   humidity = dht.readHumidity();          // Read humidity (percent)
   temp_c = dht.readTemperature();         // Read temperature as Celsius
   temp_f = dht.readTemperature(true);     // Read temperature as Farenheit
   
   if (isnan(humidity) || isnan(temp_c) || isnan(temp_f)){ //check, if values have been read correctly
-    Serial.println("Failed to read from DHT sensor!");
-    lcd.setCursor(0, 1);
-    lcd.print("Chyba pri cteni");
-    return;
-  } 
+      Serial.println("Failed to read from DHT sensor!");
+      lcd.setCursor(0, 1);
+      lcd.print("Failed to read");
+      return;
+  } else {
+      //blinking led, that temperature has been read
+      digitalWrite(TEMP_LED, HIGH);
+      delay(499);
+      digitalWrite(TEMP_LED, LOW);
+      return;
+  }
+}
+
+void valuesToLCD() {
+   //Printing data on LCD display
+      lcd.setCursor(0, 1);    
+      lcd.write(1);
+      lcd.print(temp_c);
+      lcd.print((char)223); 
+      lcd.print("C ");
+      lcd.write(2);
+      lcd.print(humidity);
+      lcd.print("%");
+      return;
+}
+
+void serialPrintValues(){
       Serial.print("Humidity: "); 
       Serial.print(humidity);
       Serial.print(" %\t");
@@ -282,36 +321,24 @@ void loop() {
       Serial.print("Temperature: "); 
       Serial.print(temp_f);
       Serial.print(" F\n");
+      return;
+}
 
-      server.handleClient();    //checking if there is some client request
-      
-      //Printing data on LCD display
-      lcd.setCursor(0, 1);    
-      lcd.write(1);
-      lcd.print(temp_c);
-      lcd.print((char)223); 
-      lcd.print("C ");
-      lcd.write(2);
-      lcd.print(humidity);
-      lcd.print("%");
+void saveToHTML(){
+   //saving data to web page
+   webPage = "<!DOCTYPE><html><head><meta charset=\" UTF-8 \"><title>Meteo Stanice</title><style> body{text-align:center;margin:10px auto;} h1, p {font-family: Arial} table{margin:auto;border-collapse:collapse;font-family:Sans-serif;font-size: 25px;} table,th,td{border:1px solid black;padding:5px;text-align:center;}</style></head><body><h1>Meteo stanice</h1><p>Pro aktuální hodnoty, obnovte stránku</p><table><thead><td>Teplota v &degF</td><td>Teplota v &degC</td><td>Vlhkost</td></thead><tbody><td>"+String((float)temp_f)+" &degF</td><td>"+String((float)temp_c)+" &degC</td><td>"+String((float)humidity)+"%</td></tbody></table></body></html>";
+   return;
+}
 
-      //blinking led, that temperature has been read
-      digitalWrite(TEMP_LED, HIGH);
-      delay(500);
-      digitalWrite(TEMP_LED, LOW);
-
-       //sending data to web page and handling client
-      webPage = "<!DOCTYPE><html><head><meta charset=\" UTF-8 \"><title>Meteo Stanice</title><style> body{text-align:center;margin:10px auto;} h1, p {font-family: Arial} table{margin:auto;border-collapse:collapse;font-family:Sans-serif;font-size: 25px;} table,th,td{border:1px solid black;padding:5px;text-align:center;}</style></head><body><h1>Meteo stanice</h1><p>Pro aktualní hodnoty teplot, obnovte stránku</p><table><thead><td>Teplota v &degF</td><td>Teplota v &degC</td><td>Vlhkost</td></thead><tbody><td>"+String((float)temp_f)+" &degF</td><td>"+String((float)temp_c)+" &degC</td><td>"+String((float)humidity)+"%</td></tbody></table></body></html>";
-      server.handleClient();
-
-       //checking if can connect to server(to Thingspeak mqtt_server is adrress, httpPort is writeAPI key)
+void sendToThingspeak()  {
+      //checking if can connect to server(to Thingspeak mqtt_server is adrress, httpPort is writeAPI key)
       WiFiClient client;
       const int httpPort = 80;
       if (!client.connect(mqtt_server, httpPort)) {
         return;
       }
       
-    //sending data to Thingspeak
+      //sending data to Thingspeak
       String url = "/update?key=";
       url+=mqtt_port;
       url+="&field1=";
@@ -326,30 +353,21 @@ void loop() {
       client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                  "Host: " + mqtt_server + "\r\n" + 
                  "Connection: close\r\n\r\n");
-
-     //waiting 5 minutes
-     //meanwhile updating time and handling client request
-     for(pocet = 0; pocet <= 150; pocet++){
-      updateData();
-      delay(1000);
-      updateData();
-      delay(1000);
-      server.handleClient();
-      Serial.print(pocet);
-      Serial.print("\t");
-     }
-     pocet = 0;            
-   
+      return;           
 }
-
-//getting updated time and date from NTP server and printing to lcd
-void updateData(){
-  timeClient.updateTime();
-  lcd.setCursor(0, 0);
-  lcd.print(timeClient.getFormattedDate("."));
-  lcd.print(" ");
-  lcd.print(timeClient.getFormattedTime());
   
-  Serial.println(timeClient.getFormattedDate("."));
-  Serial.println(timeClient.getFormattedTime());
+void loop() {
+      server.handleClient();    //checking if there is some client request
+      //unsigned long cMillis = millis();
+      if (millis() - pMillis >= 300000) {
+        readSensor();
+        valuesToLCD();
+        serialPrintValues();
+        sendToThingspeak();
+        saveToHTML();
+        //pMillis = cMillis;
+      }
+      if(millis() - timeLCDon >= 15000){
+        lcd.noBacklight();
+      }
 }
