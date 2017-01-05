@@ -1,7 +1,0 @@
-DO 5.1.2017
-
-serial.print do jednoho + funkce
-lcd.print do jednoho + funkce na teplotu prepis
-predelat do millis()
-funkce cteni senzoru
-odcasovat vsechno
