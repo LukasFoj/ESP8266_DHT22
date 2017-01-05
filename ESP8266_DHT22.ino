@@ -24,7 +24,7 @@
 #define APname "APconf"              //defining AP name
 #define APpsswd "123456789"        //defining AP password
 #define buttonON 2                  //defining ON button pin
-#define buttonOFF 0                 //defining OFF button pin
+//#define DEBUG 
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
@@ -82,7 +82,9 @@ bool shouldSaveConfig = false;
 
 //callback notifying us of the need to save config
 void saveConfigCallback () {
+  #ifdef DEBUG
   Serial.println("Should save config");
+  #endif
   shouldSaveConfig = true;
 }
 
@@ -92,15 +94,11 @@ unsigned long timeLCDon = 0;        // will store last time was LCD backlight on
 
 void backlightLCDon(){        //interupt function, which makes lcd backlight on 
       lcd.backlight();
+      #ifdef DEBUG
       Serial.println("on");
+      #endif
       timeLCDon = millis();
       return; 
-}
-
-void backlightLCDoff() {      //interupt function, which makes lcd backlight on 
-      lcd.noBacklight();
-      Serial.println("off");
-      return;
 }
 
 //DHT dht(DHT_PIN, DHT_TYPE);
@@ -112,160 +110,10 @@ void printToLCD(){     //printing AP name, AP password and AP IP address to conf
   lcd.print(APpsswd);
   lcd.setCursor(0, 1);
   lcd.print(WiFi.softAPIP());
+  #ifdef DEBUG
   Serial.println("lcd print");
+  #endif
 }
-
-void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
-  Serial.println();
-  interrupts();          //initialize interrupt
-  dht.begin();           // initialize temperature sensor
-  lcd.begin();          // initialize the LCD
-  pinMode(TEMP_LED, OUTPUT); // set LED to output
-  
-  pinMode(buttonON, INPUT);   //setting button as input
-  attachInterrupt(digitalPinToInterrupt(buttonON), backlightLCDon , HIGH);    //adding interrupt on pressing on BUTTON
-  pinMode(buttonOFF, INPUT);
-  attachInterrupt(digitalPinToInterrupt(buttonOFF), backlightLCDoff , HIGH);
- 
-  //SPIFFS.format();      //clean FS, for testing
-  Serial.println("mounting FS..."); //read configuration from FS 
-
-  if (SPIFFS.begin()) {
-    Serial.println("mounted file system");
-    if (SPIFFS.exists("/config.json")) {
-      //file exists, reading and loading
-      Serial.println("reading config file");
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile) {
-        Serial.println("opened config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
-
-        configFile.readBytes(buf.get(), size);
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.parseObject(buf.get());
-        json.printTo(Serial);
-        if (json.success()) {
-          Serial.println("\nparsed json");
-
-          strcpy(mqtt_server, json["mqtt_server"]);
-          strcpy(mqtt_port, json["mqtt_port"]);
-          //strcpy(blynk_token, json["blynk_token"]);
-
-        } else {
-          Serial.println("failed to load json config");
-        }
-      }
-    }
-  } else {
-    Serial.println("failed to mount FS");
-  }
-  //end read
-
-    
-
-
-  // The extra parameters to be configured (can be either global or just in the setup)
-  // After connecting, parameter.getValue() will get you the configured value
-  // id/name placeholder/prompt default length
-  WiFiManagerParameter custom_mqtt_server("server", "api.thingspeak.com", mqtt_server, 40);
-  WiFiManagerParameter custom_mqtt_port("port", "yourWriteAPI", mqtt_port, 40);
- // WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 32);
-
-  WiFiManager wifiManager;      //Local intialization. Once its business is done, there is no need to keep it around
-
-  wifiManager.setSaveConfigCallback(saveConfigCallback);  //set config save notify callback
-
-  //wifiManager.setSTAStaticIPConfig(IPAddress(10,0,1,99), IPAddress(10,0,1,1), IPAddress(255,255,255,0));    //you can set static IP
-  
-  //add all your parameters here
-  wifiManager.addParameter(&custom_mqtt_server);
-  wifiManager.addParameter(&custom_mqtt_port);
-  //wifiManager.addParameter(&custom_blynk_token);
-
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
-  //wifiManager.resetSettings();  //reset settings - for testing
-  
-  //wifiManager.setMinimumSignalQuality();    //set minimu quality of signal so it ignores AP's under that quality defaults to 8%
-  
-  //sets timeout until configuration portal gets turned off useful to make it all retry or go to sleep in seconds
-  wifiManager.setTimeout(300);
-
-  printToLCD();
-  
-  //fetches ssid and pass and tries to connect
-  //if it does not connect it starts an access point with the specified name
-  //here  "AutoConnectAP"
-  //and goes into a blocking loop awaiting configuration
-  if (!wifiManager.autoConnect(APname, APpsswd)) {
-    Serial.println("failed to connect and hit timeout");
-    delay(3000);
-    //reset and try again, or maybe put it to deep sleep
-    ESP.reset();
-    delay(5000);
-  }
-
-  //if you get here you have connected to the WiFi
-  Serial.println("connected...yeey :)");
-  lcd.setCursor(0, 0);
-  lcd.print("Connected Wifi              ");
-  lcd.setCursor(0, 1);
-  lcd.print(WiFi.localIP());  
-
-  //read updated parameters
-  strcpy(mqtt_server, custom_mqtt_server.getValue());
-  strcpy(mqtt_port, custom_mqtt_port.getValue());
-  //strcpy(blynk_token, custom_blynk_token.getValue());
-
-  //save the custom parameters to FS
-  if (shouldSaveConfig) {
-    Serial.println("saving config");
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& json = jsonBuffer.createObject();
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_port;
-    //json["blynk_token"] = blynk_token;
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-      Serial.println("failed to open config file for writing");
-    }
-
-    json.printTo(Serial);
-    json.printTo(configFile);
-    configFile.close();
-    //end save
-  }
-
-  Serial.println("local ip");
-  Serial.println(WiFi.localIP());
-  
-  server.on("/", [](){    //shut on webserver and sending clean webpage
-    server.send(200, "text/html", webPage);
-  });
-
-  server.begin();        //startingweb server
-  Serial.println("HTTP server started");  
-  webPage += "<!DOCTYPE html>";
-  webPage += "<html>";
-  webPage += "<body>";
-  webPage += "<p>Teplota v F: "+String((float)temp_f)+" &degF </p>";
-  webPage += "<p>Teplota v C: "+String((float)temp_c)+" &degC</p>";
-  webPage += "<p>Vlhkost: "+String((float)humidity)+"%</p>";
-  webPage += "</body>";
-  webPage += "</html>";
- 
-  lcd.createChar(1, icon_termometer);   //creating char for LCD
-  lcd.createChar(2, icon_water);
-  delay(5000);
-  
-  //lcd.noBacklight();    //shutdown display backlight
-  }
 
 //getting updated time and date from NTP server and printing to lcd
 void updateData(){
@@ -274,9 +122,10 @@ void updateData(){
   lcd.print(timeClient.getFormattedDate("."));
   lcd.print(" ");
   lcd.print(timeClient.getFormattedTime());
-  
+  #ifdef DEBUG
   Serial.println(timeClient.getFormattedDate("."));
   Serial.println(timeClient.getFormattedTime());
+  #endif
 }
 
 void readSensor(){
@@ -285,7 +134,9 @@ void readSensor(){
   temp_f = dht.readTemperature(true);     // Read temperature as Farenheit
   
   if (isnan(humidity) || isnan(temp_c) || isnan(temp_f)){ //check, if values have been read correctly
+      #ifdef DEBUG
       Serial.println("Failed to read from DHT sensor!");
+      #endif
       lcd.setCursor(0, 1);
       lcd.print("Failed to read");
       return;
@@ -355,19 +206,208 @@ void sendToThingspeak()  {
                  "Connection: close\r\n\r\n");
       return;           
 }
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  #ifdef DEBUG
+  Serial.println();
+  #endif
+  interrupts();          //initialize interrupt
+  dht.begin();           // initialize temperature sensor
+  lcd.begin();          // initialize the LCD
+  pinMode(TEMP_LED, OUTPUT); // set LED to output
+  
+  pinMode(buttonON, INPUT);   //setting button as input
+  attachInterrupt(digitalPinToInterrupt(buttonON), backlightLCDon , HIGH);    //adding interrupt on pressing on BUTTON
+ 
+  //SPIFFS.format();      //clean FS, for testing
+  #ifdef DEBUG
+  Serial.println("mounting FS..."); //read configuration from FS 
+  #endif
+
+  if (SPIFFS.begin()) {
+    #ifdef DEBUG
+    Serial.println("mounted file system");
+    #endif
+    if (SPIFFS.exists("/config.json")) {
+      //file exists, reading and loading
+      #ifdef DEBUG
+      Serial.println("reading config file");
+      #endif
+      File configFile = SPIFFS.open("/config.json", "r");
+      if (configFile) {
+        #ifdef DEBUG
+        Serial.println("opened config file");
+        #endif
+        size_t size = configFile.size();
+        // Allocate a buffer to store contents of the file.
+        std::unique_ptr<char[]> buf(new char[size]);
+
+        configFile.readBytes(buf.get(), size);
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(buf.get());
+        json.printTo(Serial);
+        if (json.success()) {
+          #ifdef DEBUG
+          Serial.println("\nparsed json");
+          #endif
+          strcpy(mqtt_server, json["mqtt_server"]);
+          strcpy(mqtt_port, json["mqtt_port"]);
+          //strcpy(blynk_token, json["blynk_token"]);
+
+        } else {
+          #ifdef DEBUG
+          Serial.println("failed to load json config");
+          #endif
+        }
+      }
+    }
+  } else {
+    #ifdef DEBUG
+    Serial.println("failed to mount FS");
+    #endif
+  }
+  //end read
+
+    
+
+
+  // The extra parameters to be configured (can be either global or just in the setup)
+  // After connecting, parameter.getValue() will get you the configured value
+  // id/name placeholder/prompt default length
+  WiFiManagerParameter custom_mqtt_server("server", "api.thingspeak.com", mqtt_server, 40);
+  WiFiManagerParameter custom_mqtt_port("port", "yourWriteAPI", mqtt_port, 40);
+ // WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 32);
+
+  WiFiManager wifiManager;      //Local intialization. Once its business is done, there is no need to keep it around
+
+  wifiManager.setSaveConfigCallback(saveConfigCallback);  //set config save notify callback
+
+  //wifiManager.setSTAStaticIPConfig(IPAddress(10,0,1,99), IPAddress(10,0,1,1), IPAddress(255,255,255,0));    //you can set static IP
+  
+  //add all your parameters here
+  wifiManager.addParameter(&custom_mqtt_server);
+  wifiManager.addParameter(&custom_mqtt_port);
+  //wifiManager.addParameter(&custom_blynk_token);
+
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+  //wifiManager.resetSettings();  //reset settings - for testing
+  
+  //wifiManager.setMinimumSignalQuality();    //set minimu quality of signal so it ignores AP's under that quality defaults to 8%
+  
+  //sets timeout until configuration portal gets turned off useful to make it all retry or go to sleep in seconds
+  wifiManager.setTimeout(300);
+
+  printToLCD();
+  
+  //fetches ssid and pass and tries to connect
+  //if it does not connect it starts an access point with the specified name
+  //here  "AutoConnectAP"
+  //and goes into a blocking loop awaiting configuration
+  if (!wifiManager.autoConnect(APname, APpsswd)) {
+    #ifdef DEBUG
+    Serial.println("failed to connect and hit timeout");
+    #endif
+    delay(3000);
+    //reset and try again, or maybe put it to deep sleep
+    ESP.reset();
+    delay(5000);
+  }
+
+  //if you get here you have connected to the WiFi
+  #ifdef DEBUG
+  Serial.println("connected...yeey :)");
+  #endif
+  lcd.setCursor(0, 0);
+  lcd.print("Connected Wifi              ");
+  lcd.setCursor(0, 1);
+  lcd.print(WiFi.localIP());  
+
+  //read updated parameters
+  strcpy(mqtt_server, custom_mqtt_server.getValue());
+  strcpy(mqtt_port, custom_mqtt_port.getValue());
+  //strcpy(blynk_token, custom_blynk_token.getValue());
+
+  //save the custom parameters to FS
+  if (shouldSaveConfig) {
+    #ifdef DEBUG
+    Serial.println("saving config");
+    #endif
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& json = jsonBuffer.createObject();
+    json["mqtt_server"] = mqtt_server;
+    json["mqtt_port"] = mqtt_port;
+    //json["blynk_token"] = blynk_token;
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile) {
+      #ifdef DEBUG
+      Serial.println("failed to open config file for writing");
+      #endif
+    }
+
+    json.printTo(Serial);
+    json.printTo(configFile);
+    configFile.close();
+    //end save
+  }
+
+  #ifdef DEBUG
+  Serial.println("local ip");
+  Serial.println(WiFi.localIP());
+  #endif
+  
+  server.on("/", [](){    //shut on webserver and sending clean webpage
+    server.send(200, "text/html", webPage);
+  });
+
+  server.begin();        //startingweb server
+  #ifdef DEBUG
+  Serial.println("HTTP server started");  
+  #endif
+  webPage += "<!DOCTYPE html>";
+  webPage += "<html>";
+  webPage += "<body>";
+  webPage += "<p>Teplota v F: "+String((float)temp_f)+" &degF </p>";
+  webPage += "<p>Teplota v C: "+String((float)temp_c)+" &degC</p>";
+  webPage += "<p>Vlhkost: "+String((float)humidity)+"%</p>";
+  webPage += "</body>";
+  webPage += "</html>";
+ 
+  lcd.createChar(1, icon_termometer);   //creating char for LCD
+  lcd.createChar(2, icon_water);
+  delay(5000);
+
+   readSensor();
+   valuesToLCD();
+   #ifdef DEBUG
+   serialPrintValues();
+   #endif
+   sendToThingspeak();
+   saveToHTML();
+  }
+
+
   
 void loop() {
       server.handleClient();    //checking if there is some client request
-      //unsigned long cMillis = millis();
+      updateData();
       if (millis() - pMillis >= 300000) {
         readSensor();
         valuesToLCD();
+        #ifdef DEBUG
         serialPrintValues();
+        #endif
         sendToThingspeak();
         saveToHTML();
-        //pMillis = cMillis;
       }
-      if(millis() - timeLCDon >= 15000){
+      if(millis() - timeLCDon >= 10000){
         lcd.noBacklight();
+        #ifdef DEBUG
+        Serial.println("LCD off"); 
+        #endif
       }
 }
