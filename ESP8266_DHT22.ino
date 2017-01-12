@@ -73,7 +73,6 @@ float humidity, temp_c, temp_f;  // Values read from sensor
 //define your default values here, if there are different values in config.json, they are overwritten.
 char mqtt_server[40] = "api.thingspeak.com";
 char mqtt_port[40] = "Your WriteAPI";
-//char blynk_token[34] = "";
 //const char* host = "api.thingspeak.com";
 //const char* writeAPIKey = "YourWriteAPI";
 
@@ -340,7 +339,6 @@ void setup() {
     JsonObject& json = jsonBuffer.createObject();
     json["mqtt_server"] = mqtt_server;
     json["mqtt_port"] = mqtt_port;
-    //json["blynk_token"] = blynk_token;
 
     File configFile = SPIFFS.open("/config.json", "w");
     if (!configFile) {
